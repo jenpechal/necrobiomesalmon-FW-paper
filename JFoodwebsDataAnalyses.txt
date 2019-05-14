@@ -1,0 +1,430 @@
+---
+title: "J_Foodwebs_Data_Analyses"
+author: "Dr. Jen Pechal"
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries}
+library(RVAideMemoire)
+library(ggplot2)
+library(plyr)
+library(Hmisc)
+library(vegan)
+library(pwr)
+library(VennDiagram)
+library(pheatmap)
+```
+
+Upload input data files.
+
+```{r data}
+ak.meta<-read.delim("~/DataFiles/AK_metadata.txt", h=T)
+
+ak_wuf.dm<-as.matrix(read.table("~/DataFiles/ak_wuf.txt", header=TRUE, sep = "\t", row.names = 1, as.is=TRUE))
+ak_wuf.dm.dis<-as.dist(ak_wuf.dm)
+
+meanphylabar_time<-read.delim("~/DataFiles/meanphylabar.txt", h=T)
+meanphylabar_time$SampleType<-factor(meanphylabar_time$SampleType, levels = c("Carcass", "Aggregates", "Larvae"))
+meanphylabar_time$Phyla<-factor(meanphylabar_time$Phyla, levels = c("Bacteria", "Actinobacteria", "Bacteroidetes", "Cyanobacteria", "Firmicutes","Fusobacteria", "Planctomycetes","Alpha-Proteobacteria","Beta-Proteobacteria", "Gamma-Proteobacteria","Tenericutes"))
+
+akalphadiv<-read.delim("~/DataFiles/akalphadiv.txt", h=T)
+akalphadiv$SampleType <- factor(akalphadiv$SampleType, levels = c("Carcass", "Aggregates", "Larvae"))
+
+jfw_16S_l7_count<-read.delim("~/DataFiles/jfw_16S_l7_count.txt", h=T)
+jfw_16S_l7_count$SampleType <- revalue(jfw_16S_l7_count$SampleType, c("CalliphoridaeLarvae"="Larvae", "CarcassSwab"="Carcass", "LarvalMassSwab"="LarvalMass"))
+jfw_16S_l7_count$SampleType <- factor(jfw_16S_l7_count$SampleType, levels = c("Carcass", "LarvalMass", "Larvae"))
+
+jfw_16S_relabund_type<-read.delim("~/DataFiles/jfw_16S_relabund_type.txt", h=T)
+jfw_16S_relabund_type$SampleType <- revalue(jfw_16S_relabund_type$SampleType, c("CalliphoridaeLarvae"="Larvae", "CarcassSwab"="Carcass", "LarvalMassSwab"="Aggregates"))
+jfw_16S_relabund_type$SampleType <- factor(jfw_16S_relabund_type$SampleType, levels = c("Carcass", "Aggregates", "Larvae"))
+```
+
+Table 1: Run PERMANOVA. Include carcassID as a random effect in the model because of the repeated sampling on the same carcass. 
+
+```{r Table1}
+set.seed(2349)
+
+adonis(ak_wuf.dm.dis~SampleType*Time_point, strata=ak.meta$Resource_ID, permutations=999, data=ak.meta)
+
+adonis(ak_wuf.dm.dis~Time_point*SampleType, strata=ak.meta$Resource_ID, permutations=999, data=ak.meta)
+```
+
+Table 2: Run a pairwise model to identify which sample types are significantly different. 
+
+```{r Table2}
+ak.type.pair<-pairwise.perm.manova(ak_wuf.dm.dis, ak.meta$SampleType, nperm=999, p.method = "fdr")
+ak.type.pair
+
+ak.time.pair<-pairwise.perm.manova(ak_wuf.dm.dis, ak.meta$Time_point, nperm=999, p.method = "fdr")
+ak.time.pair
+
+ak.meta.larvae<-subset(ak.meta, SampleType=="Larvae")
+ak.meta.aggregates<-subset(ak.meta, SampleType=="Aggregates")
+ak.meta.carcass<-subset(ak.meta, SampleType=="Carcass")
+
+ak_wuf.larvae.dm<-as.matrix(read.table("~/DataFiles/ak.wuf.larvae.txt", header=TRUE, sep = "\t", row.names = 1, as.is=TRUE))
+ak_wuf.larvae.dm.dis<-as.dist(ak_wuf.larvae.dm)
+
+ak_wuf.aggregates.dm<-as.matrix(read.table("~/DataFiles/ak.wuf.aggregates.txt", header=TRUE, sep = "\t", row.names = 1, as.is=TRUE))
+ak_wuf.aggregates.dm.dis<-as.dist(ak_wuf.aggregates.dm)
+
+ak_wuf.carcass.dm<-as.matrix(read.table("~/DataFiles/ak.wuf.carcass.txt", header=TRUE, sep = "\t", row.names = 1, as.is=TRUE))
+ak_wuf.carcass.dm.dis<-as.dist(ak_wuf.carcass.dm)
+
+ak.larvae.time.pair<-pairwise.perm.manova(ak_wuf.larvae.dm.dis, ak.meta.larvae$Time_point, nperm=999, p.method = "fdr")
+ak.larvae.time.pair
+
+ak.aggregates.time.pair<-pairwise.perm.manova(ak_wuf.aggregates.dm.dis, ak.meta.aggregates$Time_point, nperm=999, p.method = "fdr")
+ak.aggregates.time.pair
+
+ak.carcass.time.pair<-pairwise.perm.manova(ak_wuf.carcass.dm.dis, ak.meta.carcass$Time_point, nperm=999, p.method = "fdr")
+ak.carcass.time.pair
+```
+
+Figure 1: Stacked bar graph of the mean relative abundance of phyla over time within each sample type. 
+
+```{r Figure1}
+PhylaBarPalette= c("gray", "#8c510a", "#bf812d", "#dfc27d", "#f6e8c3", "#f5f5f5", "#c7eae5", "#80cdc1", "#35978f","#01665e", "black")
+
+Figure1<-ggplot() + geom_bar(aes(y = RelAbund, x = Time, fill = Phyla), data = meanphylabar_time, stat="identity") + theme_bw() + scale_fill_manual(values=PhylaBarPalette) + theme(legend.position="bottom", legend.direction="horizontal", legend.title = element_blank(), legend.text=element_text(size=11), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.text=element_text(size=14, colour="black"), axis.title = element_text(size=16)) + labs(x="Sample Event", y= "Relative Abundance") + coord_fixed(ratio=3) + facet_wrap(~SampleType)
+
+tiff("~/Figure1.tiff", width = 7, height = 6, units = 'in', res = 300)
+grid.arrange(Figure1)
+dev.off()
+```
+
+```{r multiplot, echo=FALSE}
+
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+   library(grid)
+ 
+   # Make a list from the ... arguments and plotlist
+   plots <- c(list(...), plotlist)
+ 
+   numPlots = length(plots)
+ 
+   # If layout is NULL, then use 'cols' to determine layout
+   if (is.null(layout)) {
+     # Make the panel
+     # ncol: Number of columns of plots
+     # nrow: Number of rows needed, calculated from # of cols
+     layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                     ncol = cols, nrow = ceiling(numPlots/cols))
+   }
+ 
+  if (numPlots==1) {
+     print(plots[[1]])
+ 
+   } else {
+     # Set up the page
+     grid.newpage()
+     pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+ 
+     # Make each plot, in the correct location
+     for (i in 1:numPlots) {
+       # Get the i,j matrix positions of the regions that contain this subplot
+       matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+ 
+       print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                       layout.pos.col = matchidx$col))
+     }
+   }
+ }
+```
+
+Figure 2: Alpha-diversity microbiota changes based on sample type and sample event. 
+
+```{r Figure2}
+ak.p.richness.time<-ggplot(akalphadiv, aes(Time_point, observed_otus, fill=SampleType)) + geom_boxplot() + geom_point(aes(size=1),position=position_dodge(width=0.5)) +  scale_fill_manual(values=SampleTypePalette) + theme_bw() + theme(legend.position="none", panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.text=element_text(size=12), axis.title = element_text(size=14)) + labs(x = "Sample Event",y= "Observed Species") + facet_wrap(~SampleType) + scale_fill_manual(values=SampleTypePalette)
+
+ak.p.shannondiv.time<-ggplot(akalphadiv, aes(Time_point, shannon_div, fill=SampleType)) + geom_boxplot() + geom_point(aes(size=1),position=position_dodge(width=0.5)) + scale_fill_manual(values=SampleTypePalette) + theme_bw() + theme(legend.position="none", panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.text=element_text(size=12), axis.title = element_text(size=14)) + labs(x = "Sample Event",y= "Shannon Diversity") + facet_wrap(~SampleType)
+
+ak.p.even.time<-ggplot(akalphadiv, aes(Time_point, pielou_e, fill=SampleType)) + geom_boxplot() + geom_point(aes(size=1),position=position_dodge(width=0.5)) + scale_fill_manual(values=SampleTypePalette) + theme_bw() + theme(legend.position="none", panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.text=element_text(size=12), axis.title = element_text(size=14)) + labs(x = "Sample Event",y= "Pielou Evenness") + facet_wrap(~SampleType)
+
+ak.p.faithpd.time<-ggplot(akalphadiv, aes(Time_point, faith_pd, fill=SampleType)) + geom_boxplot() + geom_point(aes(size=1),position=position_dodge(width=0.5)) + scale_fill_manual(values=SampleTypePalette) + theme_bw() + theme(legend.position="none", panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.text=element_text(size=12), axis.title = element_text(size=14)) + labs(x = "Sample Event",y= "Faith's Phylogenetic Diversity") + facet_wrap(~SampleType)
+
+multiplot((ak.p.richness.time + theme(legend.position="none") + theme(text=element_text(size=15))), (ak.p.even.time + theme(legend.position="none") + theme(text=element_text(size=15))), (ak.p.shannondiv.time + theme(legend.position="none") + theme(text=element_text(size=15))), (ak.p.faithpd.time + theme(legend.position="none") + theme(text=element_text(size=15))), cols=2)
+```
+
+Figure 3: Beta-diversity microbiota changes based on sample type and sample event.
+
+```{r Figure3}
+ak_pcoa.sampletype<-ggplot(akalphadiv, aes(PCoA1, PCoA2)) + geom_point(aes(colour=SampleType, size=5)) + scale_color_manual(values=SampleTypePalette) +  theme_bw() + geom_hline (yintercept = 0, size=0.25) + geom_vline(xintercept=0, size=0.25) + theme(text=element_text(size=20)) + coord_fixed(ratio=2)
+
+Figure3<-ak_pcoa.sampletype + labs (x = "PCoA 1 (0.55)", y = "PCoA 2 (0.16)") + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) 
+
+tiff("~/Figure3.tiff", width = 7, height = 7, units = 'in', res = 300)
+grid.arrange(Figure3)
+dev.off()
+
+```
+ 
+Beta-diversity dispersion for Figure 3.
+
+```{r Figure3 betadisper}
+ak_betadiv_mod <- betadisper(ak_wuf.dm.dis, ak.meta$SampleType)
+ak_betadiv_mod
+permutest(ak_betadiv_mod, pairwise = TRUE)
+(ak_betadiv_mod.HSD <- TukeyHSD(ak_betadiv_mod))
+plot(ak_betadiv_mod.HSD)
+plot(ak_betadiv_mod)
+boxplot(ak_betadiv_mod)
+```
+
+TableS2: Post-hoc power analysis - richness - observed operational taxonomic units (OTUs) 
+
+```{r TableS2 richness}
+anova(lm(observed_otus~SampleType, data=akalphadiv))
+
+means.SampleType_observed_otus<-aggregate(akalphadiv[, 8], list(akalphadiv$SampleType), mean)
+means.SampleType_observed_otus
+groupmeans.SampleType_observed_otus<-means.SampleType_observed_otus[,2]
+
+power.anova.test(groups = length(groupmeans.SampleType_observed_otus), between.var = var(groupmeans.SampleType_observed_otus), within.var = 197.53, power = .95)
+
+power.anova.test(groups = length(groupmeans.SampleType_observed_otus), between.var = var(groupmeans.SampleType_observed_otus), within.var = 197.53, power = .90)
+
+power.anova.test(groups = length(groupmeans.SampleType_observed_otus), between.var = var(groupmeans.SampleType_observed_otus), within.var = 197.53, power = .85)
+
+power.anova.test(groups = length(groupmeans.SampleType_observed_otus), between.var = var(groupmeans.SampleType_observed_otus), within.var = 197.53, power = .80)
+
+power.anova.test(groups = length(groupmeans.SampleType_observed_otus), between.var = var(groupmeans.SampleType_observed_otus), within.var = 197.53, power = .75)
+
+power.anova.test(groups = length(groupmeans.SampleType_observed_otus), between.var = var(groupmeans.SampleType_observed_otus), within.var = 197.53, power = .70)
+
+power.anova.test(groups = length(groupmeans.SampleType_observed_otus), between.var = var(groupmeans.SampleType_observed_otus), within.var = 197.53, power = .65)
+
+power.anova.test(groups = length(groupmeans.SampleType_observed_otus), between.var = var(groupmeans.SampleType_observed_otus), within.var = 197.53, power = .60)
+
+power.anova.test(groups = length(groupmeans.SampleType_observed_otus), between.var = var(groupmeans.SampleType_observed_otus), within.var = 197.53, power = .55)
+
+power.anova.test(groups = length(groupmeans.SampleType_observed_otus), between.var = var(groupmeans.SampleType_observed_otus), within.var = 197.53, power = .50)
+```
+
+TableS2: Post-hoc power analysis - Shannon Diversity (1-D)
+
+```{r TableS2 shannondiv}
+anova(lm(shannon_div~SampleType, data=akalphadiv))
+
+means.SampleType_shannondiv<-aggregate(akalphadiv[, 9], list(akalphadiv$SampleType), mean)
+means.SampleType_shannondiv
+groupmeans.SampleType_shannondiv<-means.SampleType_shannondiv[,2]
+
+power.anova.test(groups = length(groupmeans.SampleType_shannondiv), between.var = var(groupmeans.SampleType_shannondiv), within.var = 0.36874, power = .95)
+
+power.anova.test(groups = length(groupmeans.SampleType_shannondiv), between.var = var(groupmeans.SampleType_shannondiv), within.var = 0.36874, power = .90)
+
+power.anova.test(groups = length(groupmeans.SampleType_shannondiv), between.var = var(groupmeans.SampleType_shannondiv), within.var = 0.36874, power = .85)
+
+power.anova.test(groups = length(groupmeans.SampleType_shannondiv), between.var = var(groupmeans.SampleType_shannondiv), within.var = 0.36874, power = .80)
+
+power.anova.test(groups = length(groupmeans.SampleType_shannondiv), between.var = var(groupmeans.SampleType_shannondiv), within.var = 0.36874, power = .75)
+
+power.anova.test(groups = length(groupmeans.SampleType_shannondiv), between.var = var(groupmeans.SampleType_shannondiv), within.var = 0.36874, power = .70)
+
+power.anova.test(groups = length(groupmeans.SampleType_shannondiv), between.var = var(groupmeans.SampleType_shannondiv), within.var = 0.36874, power = .65)
+
+power.anova.test(groups = length(groupmeans.SampleType_shannondiv), between.var = var(groupmeans.SampleType_shannondiv), within.var = 0.36874, power = .60)
+
+power.anova.test(groups = length(groupmeans.SampleType_shannondiv), between.var = var(groupmeans.SampleType_shannondiv), within.var = 0.36874, power = .55)
+
+power.anova.test(groups = length(groupmeans.SampleType_shannondiv), between.var = var(groupmeans.SampleType_shannondiv), within.var = 0.36874, power = .50)
+```
+
+TableS2: Post-hoc power analysis - Pielou's Evenness
+
+```{r TableS2 evenness}
+anova(lm(pielou_e~SampleType, data=akalphadiv))
+
+means.SampleType_pielou_e<-aggregate(akalphadiv[, 10], list(akalphadiv$SampleType), mean)
+means.SampleType_pielou_e
+groupmeans.SampleType_pielou_e<-means.SampleType_pielou_e[,2]
+
+power.anova.test(groups = length(groupmeans.SampleType_pielou_e), between.var = var(groupmeans.SampleType_pielou_e), within.var = 0.006739, power = .95)
+
+power.anova.test(groups = length(groupmeans.SampleType_pielou_e), between.var = var(groupmeans.SampleType_pielou_e), within.var = 0.006739, power = .90)
+
+power.anova.test(groups = length(groupmeans.SampleType_pielou_e), between.var = var(groupmeans.SampleType_pielou_e), within.var = 0.006739, power = .85)
+
+power.anova.test(groups = length(groupmeans.SampleType_pielou_e), between.var = var(groupmeans.SampleType_pielou_e), within.var = 0.006739, power = .80)
+
+power.anova.test(groups = length(groupmeans.SampleType_pielou_e), between.var = var(groupmeans.SampleType_pielou_e), within.var = 0.006739, power = .75)
+
+power.anova.test(groups = length(groupmeans.SampleType_pielou_e), between.var = var(groupmeans.SampleType_pielou_e), within.var = 0.006739, power = .70)
+
+power.anova.test(groups = length(groupmeans.SampleType_pielou_e), between.var = var(groupmeans.SampleType_pielou_e), within.var = 0.006739, power = .65)
+
+power.anova.test(groups = length(groupmeans.SampleType_pielou_e), between.var = var(groupmeans.SampleType_pielou_e), within.var = 0.006739, power = .60)
+
+power.anova.test(groups = length(groupmeans.SampleType_pielou_e), between.var = var(groupmeans.SampleType_pielou_e), within.var = 0.006739, power = .55)
+
+power.anova.test(groups = length(groupmeans.SampleType_pielou_e), between.var = var(groupmeans.SampleType_pielou_e), within.var = 0.006739, power = .50)
+```
+
+TableS2: Post-hoc power analysis - Faith's phylogenetic diversity
+
+```{r TableS2 faith's PD}
+anova(lm(faith_pd~SampleType, data=akalphadiv))
+
+means.SampleType_richness<-aggregate(akalphadiv[, 11], list(akalphadiv$SampleType), mean)
+means.SampleType_richness
+groupmeans.SampleType_richness<-means.SampleType_richness[,2]
+
+power.anova.test(groups = length(groupmeans.SampleType_richness), between.var = var(groupmeans.SampleType_richness), within.var = 0.37394, power = .95)
+
+power.anova.test(groups = length(groupmeans.SampleType_richness), between.var = var(groupmeans.SampleType_richness), within.var = 0.37394, power = .90)
+
+power.anova.test(groups = length(groupmeans.SampleType_richness), between.var = var(groupmeans.SampleType_richness), within.var = 0.37394, power = .85)
+
+power.anova.test(groups = length(groupmeans.SampleType_richness), between.var = var(groupmeans.SampleType_richness), within.var = 0.37394, power = .80)
+
+power.anova.test(groups = length(groupmeans.SampleType_richness), between.var = var(groupmeans.SampleType_richness), within.var = 0.37394, power = .75)
+
+power.anova.test(groups = length(groupmeans.SampleType_richness), between.var = var(groupmeans.SampleType_richness), within.var = 0.37394, power = .70)
+
+power.anova.test(groups = length(groupmeans.SampleType_richness), between.var = var(groupmeans.SampleType_richness), within.var = 0.37394, power = .65)
+
+power.anova.test(groups = length(groupmeans.SampleType_richness), between.var = var(groupmeans.SampleType_richness), within.var = 0.37394, power = .60)
+
+power.anova.test(groups = length(groupmeans.SampleType_richness), between.var = var(groupmeans.SampleType_richness), within.var = 0.37394, power = .55)
+
+power.anova.test(groups = length(groupmeans.SampleType_richness), between.var = var(groupmeans.SampleType_richness), within.var = 0.37394, power = .50)
+
+```
+
+TableS4: Pairwise Wilcox sum ranked test for diversity metrics within sample type, using FDR adjusted p-value.
+
+```{r TableS4}
+akalphadiv.carcass<-subset(akalphadiv, SampleType=="Carcass")
+akalphadiv.aggregates<-subset(akalphadiv, SampleType=="Aggregates")
+akalphadiv.larvae<-subset(akalphadiv, SampleType=="Larvae")
+
+pairwise.wilcox.test(akalphadiv.carcass$observed_otus, akalphadiv.carcass$Time_point, p.adjust.method = "fdr")
+pairwise.wilcox.test(akalphadiv.carcass$shannon_div, akalphadiv.carcass$Time_point, p.adjust.method = "fdr")
+pairwise.wilcox.test(akalphadiv.carcass$pielou_e, akalphadiv.carcass$Time_point, p.adjust.method = "fdr")
+pairwise.wilcox.test(akalphadiv.carcass$faith_pd, akalphadiv.carcass$Time_point, p.adjust.method = "fdr")
+
+pairwise.wilcox.test(akalphadiv.aggregates$observed_otus, akalphadiv.aggregates$Time_point, p.adjust.method = "fdr")
+pairwise.wilcox.test(akalphadiv.aggregates$shannon_div, akalphadiv.aggregates$Time_point, p.adjust.method = "fdr")
+pairwise.wilcox.test(akalphadiv.aggregates$pielou_e, akalphadiv.aggregates$Time_point, p.adjust.method = "fdr")
+pairwise.wilcox.test(akalphadiv.aggregates$faith_pd, akalphadiv.aggregates$Time_point, p.adjust.method = "fdr")
+
+pairwise.wilcox.test(akalphadiv.larvae$observed_otus, akalphadiv.larvae$Time_point, p.adjust.method = "fdr")
+pairwise.wilcox.test(akalphadiv.larvae$shannon_div, akalphadiv.larvae$Time_point, p.adjust.method = "fdr")
+pairwise.wilcox.test(akalphadiv.larvae$pielou_e, akalphadiv.larvae$Time_point, p.adjust.method = "fdr")
+pairwise.wilcox.test(akalphadiv.larvae$faith_pd, akalphadiv.larvae$Time_point, p.adjust.method = "fdr")
+```
+
+TableS5: Pairwise Wilcox sum ranked test for diversity metrics across sample types, using FDR adjusted p-value.
+
+```{r TableS5}
+pairwise.wilcox.test(akalphadiv$observed_otus, akalphadiv$SampleType, p.adjust.method = "fdr")
+pairwise.wilcox.test(akalphadiv$shannon_div, akalphadiv$SampleType, p.adjust.method = "fdr")
+pairwise.wilcox.test(akalphadiv$pielou_e, akalphadiv$SampleType, p.adjust.method = "fdr")
+pairwise.wilcox.test(akalphadiv$faith_pd, akalphadiv$SampleType, p.adjust.method = "fdr")
+```
+
+FigureS1: Common microbiota shared among sample type.
+
+```{r FigureS1}
+grid.newpage()
+venn.plot.jfw<- draw.triple.venn(
+    area1 = 73,
+    area2 = 67,
+    area3 = 84,
+    n12 = 57,
+    n23 = 64,
+    n13 = 70,
+    n123 = 56,
+    category = c("Agg.", "Larvae", "Carcass"),
+    fill = c("skyblue", "pink1", "mediumorchid"),
+    lty = 1,
+    cex = 2.5,
+    cat.cex = 2.5,
+    euler.d=TRUE,
+    scaled=TRUE)
+
+grid.draw(venn.plot.jfw)
+```
+
+FigureS2: Heatmap of microbial relative abundance at OTU level. 
+
+```{r FigureS2}
+head(jfw_16S_l7_count[,1:10])
+dim(jfw_16S_l7_count)
+row.names(jfw_16S_l7_count) <- jfw_16S_l7_count$SampleID
+jfw_16S_l7_heat.com<-jfw_16S_l7_count[,8:96]
+jfw_16S_l7_heat.matrix<-data.matrix(jfw_16S_l7_heat.com)
+jfw_16S_l7_heat.matrix.t<-t(jfw_16S_l7_heat.com)
+
+ST<-jfw_16S_l7_count$SampleType
+heat.st.annotation_col<-data.frame(ST)
+rownames(heat.st.annotation_col) = jfw_16S_l7_count$SampleID
+head(jfw_16S_l7_heat.annotation_col)
+
+heat.st.Col <- SampleTypePalette
+names(heat.st.Col) <- levels(ST)
+AnnColour <- list(ST = heat.st.Col)
+
+pheatmap(log(jfw_16S_l7_heat.matrix.t+1), 
+  cluster_rows=T,
+  cluster_cols=T, 
+  border_color=NA, 
+  show_rownames=F, 
+  show_colnames=F, 
+  fontsize_col=12, 
+  annotation_col = heat.st.annotation_col, 
+  annotation_colors = AnnColour,
+  drop_levels= TRUE,
+  color=colorRampPalette(c("#40567a", "#4eb587", "#ffe650"))(50)
+)
+```
+
+Figure S3. Prevalent microbial taxa relative abundance among sample types. 
+
+```{r FigureS3}
+
+SampleTypePalette<-c("#E69F00", "#009E73", "black")
+
+jfw.p1<-ggplot(jfw_16S_relabund_type, aes(Acinetobacter_spp1, fill = SampleType)) + geom_density(position = "fill") + theme_bw()+ theme(panel.background = element_blank(),panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + theme(text=element_text(size=48, color="black"), axis.text.x=element_text(angle=30, hjust=1)) + scale_fill_manual(values = SampleTypePalette)
+
+jfw.p2<-ggplot(jfw_16S_relabund_type, aes(Acinetobacter_spp2, fill = SampleType)) + geom_density(position = "fill") + theme_bw()+ theme(panel.background = element_blank(),panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + theme(text=element_text(size=48, color="black"), axis.text.x=element_text(angle=30, hjust=1)) + scale_fill_manual(values = SampleTypePalette)
+
+jfw.p3<-ggplot(jfw_16S_relabund_type, aes(Clostridium_spp, fill = SampleType)) + geom_density(position = "fill") + theme_bw()+ theme(panel.background = element_blank(),panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + theme(text=element_text(size=48, color="black"), axis.text.x=element_text(angle=30, hjust=1)) + scale_fill_manual(values = SampleTypePalette)
+
+jfw.p4<-ggplot(jfw_16S_relabund_type, aes(Enterobacteriaceae, fill = SampleType)) + geom_density(position = "fill") + theme_bw()+ theme(panel.background = element_blank(),panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + theme(text=element_text(size=48, color="black"), axis.text.x=element_text(angle=30, hjust=1)) + scale_fill_manual(values = SampleTypePalette)
+
+jfw.p5<-ggplot(jfw_16S_relabund_type, aes(Erysipelothrix_spp, fill = SampleType)) + geom_density(position = "fill") + theme_bw()+ theme(panel.background = element_blank(),panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + theme(text=element_text(size=48, color="black"), axis.text.x=element_text(angle=30, hjust=1)) + scale_fill_manual(values = SampleTypePalette)
+
+jfw.p6<-ggplot(jfw_16S_relabund_type, aes(Ignatzschineria_spp, fill = SampleType)) + geom_density(position = "fill") + theme_bw()+ theme(panel.background = element_blank(),panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + theme(text=element_text(size=48, color="black"), axis.text.x=element_text(angle=30, hjust=1)) + scale_fill_manual(values = SampleTypePalette)
+
+jfw.p7<-ggplot(jfw_16S_relabund_type, aes(Morganella_spp, fill = SampleType)) + geom_density(position = "fill") + theme_bw()+ theme(panel.background = element_blank(),panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + theme(text=element_text(size=48, color="black"), axis.text.x=element_text(angle=30, hjust=1)) + scale_fill_manual(values = SampleTypePalette)
+
+jfw.p8<-ggplot(jfw_16S_relabund_type, aes(Myroides_odoratimimus, fill = SampleType)) + geom_density(position = "fill") + theme_bw()+ theme(panel.background = element_blank(),panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + theme(text=element_text(size=48, color="black"), axis.text.x=element_text(angle=30, hjust=1)) + scale_fill_manual(values = SampleTypePalette)
+
+jfw.p9<-ggplot(jfw_16S_relabund_type, aes(Planococcaceae, fill = SampleType)) + geom_density(position = "fill") + theme_bw()+ theme(panel.background = element_blank(),panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + theme(text=element_text(size=48, color="black"), axis.text.x=element_text(angle=30, hjust=1)) + scale_fill_manual(values = SampleTypePalette)
+
+jfw.p10<-ggplot(jfw_16S_relabund_type, aes(Sporosarcina_spp, fill = SampleType)) + geom_density(position = "fill") + theme_bw()+ theme(panel.background = element_blank(),panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + theme(text=element_text(size=48, color="black"), axis.text.x=element_text(angle=30, hjust=1)) + scale_fill_manual(values = SampleTypePalette)
+
+jfw.p11<-ggplot(jfw_16S_relabund_type, aes(Tepidimicrobium_spp, fill = SampleType)) + geom_density(position = "fill") + theme_bw()+ theme(panel.background = element_blank(),panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + theme(text=element_text(size=48, color="black"), axis.text.x=element_text(angle=30, hjust=1)) + scale_fill_manual(values = SampleTypePalette)
+
+jfw.p12<-ggplot(jfw_16S_relabund_type, aes(Tissierellaceae, fill = SampleType)) + geom_density(position = "fill") + theme_bw()+ theme(panel.background = element_blank(),panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + theme(text=element_text(size=48, color="black"), axis.text.x=element_text(angle=30, hjust=1)) + scale_fill_manual(values = SampleTypePalette)
+
+jfw.p13<-ggplot(jfw_16S_relabund_type, aes(Vagococcus_spp, fill = SampleType)) + geom_density(position = "fill") + theme_bw()+ theme(panel.background = element_blank(),panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + theme(text=element_text(size=48, color="black"), axis.text.x=element_text(angle=30, hjust=1)) + scale_fill_manual(values = SampleTypePalette)
+
+jfw.p14<-ggplot(jfw_16S_relabund_type, aes(Wohlfahrtiimonas_spp, fill = SampleType)) + geom_density(position = "fill") + theme_bw()+ theme(panel.background = element_blank(),panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + theme(text=element_text(size=48, color="black"), axis.text.x=element_text(angle=30, hjust=1)) + scale_fill_manual(values = SampleTypePalette)
+
+multiplot((jfw.p1 + theme(legend.position="none") + theme(text=element_text(size=12))), (jfw.p2 + theme(legend.position="none") + theme(text=element_text(size=12))), (jfw.p3 + theme(legend.position="none") + theme(text=element_text(size=12))), (jfw.p4 + theme(legend.position="none") + theme(text=element_text(size=12))), (jfw.p5 + theme(legend.position="none") + theme(text=element_text(size=12))), (jfw.p6 + theme(legend.position="none") + theme(text=element_text(size=12))), (jfw.p7 + theme(legend.position="none") + theme(text=element_text(size=12))), (jfw.p8 + theme(legend.position="none") + theme(text=element_text(size=12))), (jfw.p9 + theme(legend.position="none") + theme(text=element_text(size=12))), (jfw.p10 + theme(legend.position="none") + theme(text=element_text(size=12))), (jfw.p11 + theme(legend.position="none") + theme(text=element_text(size=12))), (jfw.p12 + theme(legend.position="none") + theme(text=element_text(size=12))), (jfw.p13 + theme(legend.position="none") + theme(text=element_text(size=12))), (jfw.p14 + theme(legend.position="none") + theme(text=element_text(size=12))), cols=5)
+```
+
+Clear memory.
+
+```{r clearmemory}
+gc()
+rm(list = ls())
+.rs.restartR()
+```
